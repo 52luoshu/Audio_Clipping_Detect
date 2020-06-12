@@ -1,4 +1,5 @@
-# Audio_TopCut_Detect
-Assesment  clipping distortion of audio
-Calculate the short-term energy of the signal to detect the clipping distortion of audio in the video stream. 
-The original input data can be URL or streaming data or local video. The project has a built-in decoding function.
+# Audio_Clipping_Detect
+采用滑动窗检测语音信号短时能量，判断削顶失真，检测音频音量；
+封装了音频基频估计，用以判断音频可能的来源，以作针对性调整；
+封装了解码功能，从视频中解码出音频，支持流或url形式的输入源；
+命令参数：视频源 检测周期(s)

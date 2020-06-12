@@ -1,3 +1,5 @@
+//main.cpp -- 主函数入口(备注:功能性函数为audioProcess)
+
 #include "audioqualitydetect.h"
 #include <fstream>
 #include <iostream>
@@ -6,27 +8,23 @@ using namespace std;
 
 int main(int argc,char** argv)
 {
-	if (argc < 3)
+	if (argc < 2)
 	{
-		printf("usage: inputVideo fps cycle(s)\n");
+		printf("usage: inputVideo cycle(s)\n");
 		exit(1);
 	}
 	const char* inputFile = argv[1];
 	float fps, period;
 	stringstream ss;
-	ss << argv[2]; ss >> fps; ss.clear();
-	ss << argv[3]; ss >> period; ss.clear();
+	ss << argv[2]; ss >> period; ss.clear();
 
 	AVFormatContext *pFormatCtx;
 	int audioStreamIndex = -1;
 	int videoStreamIndex = -1;
 	unsigned int i = 0;
 
-
-	//注册组件
-	avdevice_register_all();
-	//封装格式上下文
-	pFormatCtx = avformat_alloc_context();
+	avdevice_register_all();	//注册组件
+	pFormatCtx = avformat_alloc_context();	//封装格式上下文
 	//打开输入文件
 	if (avformat_open_input(&pFormatCtx, inputFile, NULL, NULL) != 0)
 	{
@@ -56,7 +54,7 @@ int main(int argc,char** argv)
 	}
 	else
 	{
-		video2audio(pFormatCtx, audioStreamIndex, fps,period);
+		audioProcess(pFormatCtx, audioStreamIndex, period);
 	}
 	avformat_close_input(&pFormatCtx);
 	return 0;

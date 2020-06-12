@@ -1,10 +1,23 @@
-//video2audio.cpp -- 功能函数，从视频中解码出音频,并计算音频信号短时能量，保存在日志文件中
+//audioprcess.cpp -- 功能函数，从视频中解码出音频,并计算音频信号短时能量，保存在日志文件中
 #include "audioqualitydetect.h"
 
-void video2audio(AVFormatContext *pFormatCtx, int streamIndex, float audiofps, float period)
+void audioProcess(AVFormatContext *pFormatCtx, int streamIndex, float period)
 {
+	/****************** SWITCH INIT *****************/
+	bool bypass_energy = 0;
+	bool bypass_acf = 1;
+	int cycle_acf = 1;			//基频检测间隔（帧）
+
 	/****************** 数据与日志初始化 *****************/
-	float fps = audiofps, cycle = period;
+	uint64_t frmcnt = 0;		//帧数统计
+	int16_t value_instant = 0;	//瞬时能量
+	uint64_t power_period = 0;	//监控周期内信号能量
+	vector<int16_t>wavFrame;	//单帧内sample点
+	queue<int16_t>valuelist;	//按帧存储
+	int acf = 0;				//基频
+
+	/****************** 数据与日志初始化 *****************/
+	float cycle = period;
 	char logtime[20] = { 0 };
 	getTime(logtime);
 	char logfile[80];
@@ -43,35 +56,36 @@ void video2audio(AVFormatContext *pFormatCtx, int streamIndex, float audiofps, f
 		printf("can't open codec!\n");
 		exit(1);
 	}
-	//编码数据
-	AVPacket *packet = (AVPacket*)av_malloc(sizeof(AVPacket));
-	//解压缩数据
-	AVFrame *frame = av_frame_alloc();
-	//frame -> 16bit PCM 统一音频采样格式
-	SwrContext *swrCtx = swr_alloc();
+	
+	AVPacket *packet = (AVPacket*)av_malloc(sizeof(AVPacket));	//编码数据
+	AVFrame *frame = av_frame_alloc();	//解压缩数据
+	SwrContext *swrCtx = swr_alloc();	//frame -> 16bit PCM 统一音频采样格式
 
 	//---------------- 开始重采样设置选项 ----------------
 	AVSampleFormat inSampleFmt = pCodecCtx->sample_fmt;	//输入的采样格式
 	AVSampleFormat outSampleFmt = AV_SAMPLE_FMT_S16;	//输出的采样格式
 	int inSampleRate = pCodecCtx->sample_rate;	//输入的采样率
 	int outSampleRate = inSampleRate;	//输出的采样率
+	float fps = outSampleRate / 1024;
 	uint16_t inChannelLayout = pCodecCtx->channel_layout;	//输入的声道布局
 	uint16_t outChannelLayout = AV_CH_LAYOUT_MONO;	//输出的声道布局
 	swr_alloc_set_opts(swrCtx, outChannelLayout, outSampleFmt, outSampleRate, inChannelLayout, inSampleFmt, inSampleRate, 0, NULL);
 	swr_init(swrCtx);
 	//---------------- 完成重采样设置选项 ----------------
-	sprintf(info_log, "[info] Format: %d SampleRate: %d Channels: %d\n", inSampleFmt, inSampleRate, inChannelLayout);
+	sprintf(info_log, "[info] Format: %d SampleRate: %d Channels: %llu\n", inSampleFmt, inSampleRate, inChannelLayout);
 	writeLog(log, info_log, 0);
+	int fullcycle = (int)(fps*cycle);
+	int halfcycle = (int)(fps*cycle / 2);
+
 	int outChannelNb = av_get_channel_layout_nb_channels(outChannelLayout);	//获取输出声道个数
 	uint8_t *outBuffer = (uint8_t*)av_malloc(2 * outSampleRate);	//存储PCM数据
-	//回到流的初始位置
-	av_seek_frame(pFormatCtx, streamIndex, 0, AVSEEK_FLAG_BACKWARD);
+	av_seek_frame(pFormatCtx, streamIndex, 0, AVSEEK_FLAG_BACKWARD);	//回到流的初始位置
 	/****************** 按帧读取压缩的音频数据AVPacket *****************/
-	int outBufferSize = 0;
-	uint64_t frmcnt = 0;
-	int16_t value_instant = 0;
-	uint32_t power_instant = 0;
-	uint64_t power_period = 0;
+
+	for (int i = 0; i < fullcycle; i++)
+	{
+		valuelist.push(0);
+	}
 	while (av_read_frame(pFormatCtx, packet) >= 0)
 	{
 		if (packet->stream_index == streamIndex)
@@ -85,25 +99,36 @@ void video2audio(AVFormatContext *pFormatCtx, int streamIndex, float audiofps, f
 			}
 			if (avcodec_receive_frame(pCodecCtx, frame) >= 0)
 			{
-				swr_convert(swrCtx, &outBuffer, 4 * 44100, (const uint8_t**)frame->data, frame->nb_samples);
-				//获取sample的size
-				outBufferSize = av_samples_get_buffer_size(NULL, outChannelNb, frame->nb_samples, outSampleFmt, 1);
-				//计算短时能量
+				swr_convert(swrCtx, &outBuffer, 4 * outSampleRate, (const uint8_t**)frame->data, frame->nb_samples);
 				value_instant = *(short *)outBuffer;
-				power_instant = pow(value_instant, 2);
 
-				if ((frmcnt % (int)(fps*cycle)) != 0)
+
+				if (bypass_acf && frmcnt%cycle_acf == 0)
 				{
-					power_period += power_instant;
-				}
-				if ((frmcnt % (int)(fps*cycle)) == 0)
-				{
-					power_period += power_instant;
-					sprintf(info_log, "frm%d: %lld", frmcnt, power_period);
+					//音频基频检测
+					wavFrame.clear();
+					for (int i = 0; i < frame->nb_samples; i++)
+					{
+						wavFrame.push_back(((uint8_t)*(frame->data[0] + i)) * 257 - 32768);
+					}
+					acf = getACF(wavFrame, outSampleRate);
+					sprintf(info_log, "[frm%llu] ACF: %d", frmcnt, acf);
 					writeLog(log, info_log, 0);
-					power_instant = 0;
-					power_period = 0;
 				}
+				
+				if (bypass_energy)
+				{
+					//以矩形滑动窗方式计算检测周期内能量
+					valuelist.pop();
+					valuelist.push(value_instant);
+					if (frmcnt%halfcycle == 0)
+					{
+						power_period = getEnergy(valuelist);
+						sprintf(info_log, "[frm%llu] power: %llu", frmcnt, power_period);
+						writeLog(log, info_log, 0);
+					}
+				}
+
 				frmcnt += 1;
 			}
 		}

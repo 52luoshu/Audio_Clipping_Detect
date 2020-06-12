@@ -1,7 +1,13 @@
 #include <stdio.h>
-#include <cstdio>
-#include <ctime>
 #include <assert.h>
+#include <vector>
+#include <queue>
+#include <iostream>
+#include <time.h>
+#include <tchar.h>
+#include <stdlib.h>
+#include <string.h>
+#include <Windows.h>
 
 extern "C"
 {
@@ -12,8 +18,15 @@ extern "C"
 #include "libswresample/swresample.h"
 #include "libavutil/imgutils.h"
 }
+#define PI 3.1415926
 
-void video2audio(AVFormatContext *pFormatCtx, int streamIndex,  float audiofps, float period);
+using namespace std;
+
+void audioProcess(AVFormatContext *pFormatCtx, int streamIndex,  float period);	//音频解码与功能集成
+uint64_t getEnergy(queue<int16_t>valuelist);	//短时能量
+queue<float> hammingWin(int length);	//海明窗
+queue<int>rectangularWin(int length);	//矩形窗
+int getACF(vector<int16_t>wavFrame, int sampleRate);	//基频估计
 
 int getLogTime(char* out, int fmt);
 int getTime(char* out);
